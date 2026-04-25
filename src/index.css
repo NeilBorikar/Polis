@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #3b82f6; /* blue-500 */
+  --color-success: #22c55e; /* green-500 */
+  --color-warning: #f59e0b; /* amber-500 */
+  --color-danger: #ef4444; /* red-500 */
+  --color-background: #0f172a; /* slate-900 */
+  --color-surface: #1e293b; /* slate-800 */
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  background-color: var(--color-background);
+  color: #f8fafc;
+  overflow: hidden; /* App runs full screen with overlapping panels */
+}
+
+/* Custom Scrollbar for boards */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
