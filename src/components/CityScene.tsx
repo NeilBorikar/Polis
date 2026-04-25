@@ -218,7 +218,6 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
         // Skip very center (intersection box)
         for (let d = -total / 2; d <= total / 2; d++) {
           const offset = d * step;
-          const absOff = Math.abs(offset);
           // Skip the intersection squares
           const isIntersection = ROAD_AXES.some(r => Math.abs(offset - r) < ROAD_WIDTH * 0.75);
           if (isIntersection) continue;
