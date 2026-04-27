@@ -40,6 +40,7 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
   const bodyRef   = useRef<THREE.Mesh>(null);
   const antenRef  = useRef<THREE.Mesh>(null);
   const roofRef   = useRef<THREE.Mesh>(null);
+  const windowRefs = useRef<(THREE.Mesh | null)[]>([]);
 
   useFrame((s) => {
     const t  = s.clock.elapsedTime;
@@ -50,16 +51,25 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
     }
     if (antenRef.current) {
       antenRef.current.position.y = b.h * wave + 0.4;
-      // Slow blink
       const mat = antenRef.current.material as THREE.MeshStandardMaterial;
       mat.emissiveIntensity = 1.5 + Math.sin(t * 3 + b.z) * 1.0;
     }
     if (roofRef.current) roofRef.current.position.y = b.h * wave;
+    
+    // Flicker windows
+    windowRefs.current.forEach((m, i) => {
+      if (!m) return;
+      const mat = m.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = 1.2 + Math.sin(t * 1.5 + i * 0.5 + b.x * 0.3) * 0.8;
+    });
   });
 
   const floorLineColor = zone.emissive;
   const floorH = b.h / Math.max(b.floors, 1);
-
+  const buildingType = Math.random();
+  const hasBalconies = buildingType > 0.4;
+  const windowsPerRow = Math.max(2, Math.ceil(b.w / 0.4));
+  
   return (
     <group position={[b.x, 0, b.z]}>
       {/* Main body */}
@@ -72,46 +82,191 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
         />
       </mesh>
 
-      {/* Horizontal floor lines for detail */}
-      {Array.from({ length: b.floors - 1 }, (_, fi) => {
-        const y = floorH * (fi + 1);
+      {/* Structural columns - vertical edges */}
+      {Array.from({ length: Math.floor(b.w / 0.6) + 1 }, (_, ci) => {
+        const xPos = -b.w / 2 + (ci * b.w) / Math.max(Math.floor(b.w / 0.6), 1);
         return (
-          <mesh key={fi} position={[0, y, b.d / 2 + 0.01]} rotation={[0, 0, 0]}>
-            <planeGeometry args={[b.w, 0.04]} />
-            <meshStandardMaterial color={floorLineColor} emissive={floorLineColor} emissiveIntensity={0.6} transparent opacity={0.7} />
+          <mesh key={`colz${ci}`} position={[xPos, b.h / 2, b.d / 2 + 0.04]}>
+            <boxGeometry args={[0.08, b.h, 0.06]} />
+            <meshStandardMaterial color="#050d15" metalness={0.4} roughness={0.5} />
           </mesh>
         );
       })}
-      {/* Back face floor lines */}
-      {Array.from({ length: b.floors - 1 }, (_, fi) => {
-        const y = floorH * (fi + 1);
+      {Array.from({ length: Math.floor(b.w / 0.6) + 1 }, (_, ci) => {
+        const xPos = -b.w / 2 + (ci * b.w) / Math.max(Math.floor(b.w / 0.6), 1);
         return (
-          <mesh key={`b${fi}`} position={[0, y, -(b.d / 2 + 0.01)]} rotation={[0, Math.PI, 0]}>
-            <planeGeometry args={[b.w, 0.04]} />
-            <meshStandardMaterial color={floorLineColor} emissive={floorLineColor} emissiveIntensity={0.6} transparent opacity={0.7} />
+          <mesh key={`colz-b${ci}`} position={[xPos, b.h / 2, -(b.d / 2 + 0.04)]}>
+            <boxGeometry args={[0.08, b.h, 0.06]} />
+            <meshStandardMaterial color="#050d15" metalness={0.4} roughness={0.5} />
           </mesh>
         );
       })}
 
-      {/* Rooftop slab */}
-      <mesh ref={roofRef} position={[0, b.h, 0]}>
-        <boxGeometry args={[b.w + 0.15, 0.12, b.d + 0.15]} />
+      {/* Front facade - detailed windows with lighting */}
+      {Array.from({ length: b.floors }, (_, fi) => {
+        const y = floorH * fi + floorH / 2;
+        return Array.from({ length: windowsPerRow }, (_, wi) => {
+          const xPos = -b.w / 2 + (wi + 0.5) * (b.w / windowsPerRow);
+          const windowLit = Math.random() > 0.3;
+          const windowIdx = fi * windowsPerRow + wi;
+          return (
+            <mesh key={`win-f${fi}-${wi}`} ref={el => { windowRefs.current[windowIdx] = el; }} 
+              position={[xPos, y, b.d / 2 + 0.05]}>
+              <boxGeometry args={[b.w / windowsPerRow * 0.7, floorH * 0.6, 0.03]} />
+              <meshStandardMaterial 
+                color={windowLit ? '#334466' : '#1a2a3a'}
+                emissive={windowLit ? '#4488ff' : '#001a33'}
+                emissiveIntensity={windowLit ? 1.8 : 0.2}
+                metalness={0.3}
+                roughness={0.4}
+              />
+            </mesh>
+          );
+        });
+      })}
+
+      {/* Back facade - matching windows */}
+      {Array.from({ length: b.floors }, (_, fi) => {
+        const y = floorH * fi + floorH / 2;
+        return Array.from({ length: windowsPerRow }, (_, wi) => {
+          const xPos = -b.w / 2 + (wi + 0.5) * (b.w / windowsPerRow);
+          const windowLit = Math.random() > 0.3;
+          return (
+            <mesh key={`win-b${fi}-${wi}`} position={[xPos, y, -(b.d / 2 + 0.05)]}>
+              <boxGeometry args={[b.w / windowsPerRow * 0.7, floorH * 0.6, 0.03]} />
+              <meshStandardMaterial 
+                color={windowLit ? '#334466' : '#1a2a3a'}
+                emissive={windowLit ? '#4488ff' : '#001a33'}
+                emissiveIntensity={windowLit ? 1.8 : 0.2}
+                metalness={0.3}
+                roughness={0.4}
+              />
+            </mesh>
+          );
+        });
+      })}
+
+      {/* Side windows - depth facade */}
+      {Array.from({ length: b.floors }, (_, fi) => {
+        const y = floorH * fi + floorH / 2;
+        const sidesPerFloor = Math.max(1, Math.floor(b.d / 0.5));
+        return Array.from({ length: sidesPerFloor }, (_, si) => {
+          const zPos = -b.d / 2 + (si + 0.5) * (b.d / sidesPerFloor);
+          const windowLit = Math.random() > 0.4;
+          return (
+            <mesh key={`win-s${fi}-${si}`} position={[b.w / 2 + 0.05, y, zPos]}>
+              <boxGeometry args={[0.03, floorH * 0.6, b.d / sidesPerFloor * 0.65]} />
+              <meshStandardMaterial 
+                color={windowLit ? '#334466' : '#1a2a3a'}
+                emissive={windowLit ? '#4488ff' : '#001a33'}
+                emissiveIntensity={windowLit ? 1.8 : 0.2}
+              />
+            </mesh>
+          );
+        });
+      })}
+      {Array.from({ length: b.floors }, (_, fi) => {
+        const y = floorH * fi + floorH / 2;
+        const sidesPerFloor = Math.max(1, Math.floor(b.d / 0.5));
+        return Array.from({ length: sidesPerFloor }, (_, si) => {
+          const zPos = -b.d / 2 + (si + 0.5) * (b.d / sidesPerFloor);
+          const windowLit = Math.random() > 0.4;
+          return (
+            <mesh key={`win-s2${fi}-${si}`} position={[-(b.w / 2 + 0.05), y, zPos]}>
+              <boxGeometry args={[0.03, floorH * 0.6, b.d / sidesPerFloor * 0.65]} />
+              <meshStandardMaterial 
+                color={windowLit ? '#334466' : '#1a2a3a'}
+                emissive={windowLit ? '#4488ff' : '#001a33'}
+                emissiveIntensity={windowLit ? 1.8 : 0.2}
+              />
+            </mesh>
+          );
+        });
+      })}
+
+      {/* Horizontal floor lines for visual separation */}
+      {Array.from({ length: b.floors - 1 }, (_, fi) => {
+        const y = floorH * (fi + 1);
+        return (
+          <mesh key={fi} position={[0, y, b.d / 2 + 0.02]} rotation={[0, 0, 0]}>
+            <boxGeometry args={[b.w, 0.06, 0.04]} />
+            <meshStandardMaterial color={floorLineColor} emissive={floorLineColor} emissiveIntensity={0.5} />
+          </mesh>
+        );
+      })}
+      {Array.from({ length: b.floors - 1 }, (_, fi) => {
+        const y = floorH * (fi + 1);
+        return (
+          <mesh key={`b${fi}`} position={[0, y, -(b.d / 2 + 0.02)]}>
+            <boxGeometry args={[b.w, 0.06, 0.04]} />
+            <meshStandardMaterial color={floorLineColor} emissive={floorLineColor} emissiveIntensity={0.5} />
+          </mesh>
+        );
+      })}
+
+      {/* Balconies on front face (for some buildings) */}
+      {hasBalconies && Array.from({ length: Math.max(0, b.floors - 2) }, (_, fi) => {
+        const y = floorH * (fi + 2.5);
+        return (
+          <mesh key={`bal${fi}`} position={[0, y, b.d / 2 + 0.15]}>
+            <boxGeometry args={[b.w * 0.95, 0.08, 0.25]} />
+            <meshStandardMaterial color="#0a1520" emissive="#1a3a5a" emissiveIntensity={0.2} metalness={0.6} roughness={0.4} />
+          </mesh>
+        );
+      })}
+
+      {/* Rooftop slab - more detailed */}
+      <mesh ref={roofRef} position={[0, b.h, 0]} castShadow>
+        <boxGeometry args={[b.w + 0.2, 0.15, b.d + 0.2]} />
         <meshStandardMaterial color="#0a1e30" emissive={zone.emissive} emissiveIntensity={0.25} metalness={0.95} roughness={0.05} />
       </mesh>
 
-      {/* Antenna / spire (only on taller buildings) */}
-      {b.h > 5 && (
-        <mesh ref={antenRef} position={[0, b.h + 0.4, 0]}>
-          <cylinderGeometry args={[0.02, 0.02, 0.8, 6]} />
-          <meshStandardMaterial color="#ff3366" emissive="#ff0044" emissiveIntensity={2} />
+      {/* Rooftop edge trim */}
+      {[
+        [0, 0, b.d / 2 + 0.1],
+        [0, 0, -(b.d / 2 + 0.1)],
+      ].map((pos, i) => (
+        <mesh key={`edge${i}`} position={pos as [number, number, number]}>
+          <boxGeometry args={[b.w + 0.2, 0.1, 0.05]} />
+          <meshStandardMaterial color="#050d15" metalness={0.5} roughness={0.5} />
         </mesh>
+      ))}
+
+      {/* Multiple antenna / communication towers */}
+      {b.h > 5 && (
+        <>
+          <mesh ref={antenRef} position={[-b.w * 0.3, b.h + 0.3, 0]}>
+            <cylinderGeometry args={[0.015, 0.015, 0.6, 5]} />
+            <meshStandardMaterial color="#ff3366" emissive="#ff0044" emissiveIntensity={2} metalness={0.9} roughness={0.1} />
+          </mesh>
+          <mesh position={[b.w * 0.3, b.h + 0.35, 0]}>
+            <cylinderGeometry args={[0.012, 0.012, 0.7, 5]} />
+            <meshStandardMaterial color="#ff5588" emissive="#ff2266" emissiveIntensity={1.8} metalness={0.9} roughness={0.1} />
+          </mesh>
+        </>
       )}
 
-      {/* Rooftop AC units / mechanical boxes */}
-      <mesh position={[b.w * 0.25, b.h + 0.18, b.d * 0.25]}>
-        <boxGeometry args={[b.w * 0.22, 0.24, b.d * 0.22]} />
-        <meshStandardMaterial color="#071520" metalness={0.7} roughness={0.3} />
+      {/* Rooftop AC/mechanical units - multiple boxes */}
+      <mesh position={[b.w * 0.3, b.h + 0.2, b.d * 0.35]}>
+        <boxGeometry args={[b.w * 0.25, 0.3, b.d * 0.25]} />
+        <meshStandardMaterial color="#0a1520" metalness={0.8} roughness={0.2} />
       </mesh>
+      <mesh position={[-b.w * 0.25, b.h + 0.15, -b.d * 0.3]}>
+        <boxGeometry args={[b.w * 0.2, 0.25, b.d * 0.2]} />
+        <meshStandardMaterial color="#051020" metalness={0.7} roughness={0.3} />
+      </mesh>
+      <mesh position={[0, b.h + 0.22, -b.d * 0.4]}>
+        <boxGeometry args={[b.w * 0.3, 0.28, b.d * 0.18]} />
+        <meshStandardMaterial color="#0a1a2a" metalness={0.75} roughness={0.25} />
+      </mesh>
+
+      {/* Rooftop details - conduit pipes */}
+      {Array.from({ length: 2 }, (_, pi) => (
+        <mesh key={`pipe${pi}`} position={[-b.w * 0.2 + pi * b.w * 0.4, b.h + 0.35, b.d * 0.45]}>
+          <cylinderGeometry args={[0.03, 0.03, b.h * 0.4, 6]} />
+          <meshStandardMaterial color="#0a1a2a" metalness={0.6} roughness={0.4} />
+        </mesh>
+      ))}
     </group>
   );
 }
