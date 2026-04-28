@@ -1,4 +1,4 @@
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, useState, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
 import * as THREE from 'three';
@@ -7,16 +7,19 @@ import type { Issue } from '../types';
 
 // ── Zone definitions (reduced counts, wider rings to avoid congestion) ─────
 const ZONES = [
-  { count: 8,  rMin: 1,   rMax: 5,   hMin: 6, hMax: 14, color: '#1a5ea8', emissive: '#2a8fe0', emissiveInt: 0.5, metal: 0.9, rough: 0.08 },
-  { count: 14, rMin: 6,   rMax: 12,  hMin: 2, hMax: 7,  color: '#0d3d6b', emissive: '#1a6db5', emissiveInt: 0.3, metal: 0.6, rough: 0.3  },
-  { count: 18, rMin: 13,  rMax: 20,  hMin: 1, hMax: 3,  color: '#0a2540', emissive: '#0d4a80', emissiveInt: 0.2, metal: 0.3, rough: 0.6  },
+  // Downtown: fewer taller buildings, slightly wider ring
+  { count: 6, rMin: 1.5, rMax: 6.5, hMin: 8, hMax: 16, color: '#4a7fa7', emissive: '#5fa3d4', emissiveInt: 0.4, metal: 0.85, rough: 0.12, windowColor: '#89c3e8' },
+  // Mid-ring: reduced count, spread wider
+  { count: 10, rMin: 7.5, rMax: 14, hMin: 2.5, hMax: 8, color: '#6b7a8a', emissive: '#8b9aaa', emissiveInt: 0.25, metal: 0.5, rough: 0.4, windowColor: '#7db8d4' },
+  // Outer: residential — lower density, larger spacing
+  { count: 10, rMin: 15, rMax: 24, hMin: 1, hMax: 4, color: '#8b6f47', emissive: '#a89968', emissiveInt: 0.15, metal: 0.2, rough: 0.7, windowColor: '#f5d890' },
 ];
 
 // Minimum spacing between buildings (world-units)
-const MIN_DIST = 3.2;
+const MIN_DIST = 4.2;
 
 function randInRingSpaced(
-  rMin: number, rMax: number, existing: Array<[number, number]>, tries = 40
+  rMin: number, rMax: number, existing: Array<[number, number]>, tries = 40, minDist = MIN_DIST
 ): [number, number] {
   for (let t = 0; t < tries; t++) {
     const angle = Math.random() * Math.PI * 2;
@@ -25,7 +28,7 @@ function randInRingSpaced(
     const z = Math.sin(angle) * r;
     // Skip if too close to a major road axis (±0.6 units → leave room for roads)
     if (Math.abs(x) < 0.8 || Math.abs(z) < 0.8) continue;
-    const tooClose = existing.some(([ex, ez]) => Math.hypot(x - ex, z - ez) < MIN_DIST);
+    const tooClose = existing.some(([ex, ez]) => Math.hypot(x - ex, z - ez) < minDist);
     if (!tooClose) return [x, z];
   }
   // Fallback (ring edge, angle jitter)
@@ -36,14 +39,14 @@ function randInRingSpaced(
 interface BD { x: number; z: number; w: number; h: number; d: number; floors: number }
 
 // ── Building with detail geometry ─────────────────────────────────────────
-function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
-  const bodyRef   = useRef<THREE.Mesh>(null);
-  const antenRef  = useRef<THREE.Mesh>(null);
-  const roofRef   = useRef<THREE.Mesh>(null);
+function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; onClick?: (pt: [number, number, number]) => void }) {
+  const bodyRef = useRef<THREE.Mesh>(null);
+  const antenRef = useRef<THREE.Mesh>(null);
+  const roofRef = useRef<THREE.Mesh>(null);
   const windowRefs = useRef<(THREE.Mesh | null)[]>([]);
 
   useFrame((s) => {
-    const t  = s.clock.elapsedTime;
+    const t = s.clock.elapsedTime;
     const wave = 1 + Math.sin(t * 0.35 + b.x * 0.4) * 0.006;
     if (bodyRef.current) {
       bodyRef.current.scale.y = wave;
@@ -55,7 +58,7 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
       mat.emissiveIntensity = 1.5 + Math.sin(t * 3 + b.z) * 1.0;
     }
     if (roofRef.current) roofRef.current.position.y = b.h * wave;
-    
+
     // Flicker windows
     windowRefs.current.forEach((m, i) => {
       if (!m) return;
@@ -69,26 +72,45 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
   const buildingType = Math.random();
   const hasBalconies = buildingType > 0.4;
   const windowsPerRow = Math.max(2, Math.ceil(b.w / 0.4));
-  
+
+  // Color variation for buildings
+  const colorVar = buildingType;
+  const bodyColor = colorVar > 0.7 ? '#5a8ab7' : colorVar > 0.4 ? zone.color : '#506070';
+  const windowColor = (zone as any).windowColor || '#89c3e8';
+  const structureColor = buildingType > 0.6 ? '#3a4a5a' : '#2a3a4a';
+
+  const grpRef = useRef<THREE.Group>(null);
+
+  const handlePointerOver = (e: any) => {
+    e.stopPropagation();
+    document.body.style.cursor = 'pointer';
+    if (grpRef.current) grpRef.current.scale.set(1.04, 1.04, 1.04);
+  };
+  const handlePointerOut = (e: any) => {
+    e.stopPropagation();
+    document.body.style.cursor = 'default';
+    if (grpRef.current) grpRef.current.scale.set(1, 1, 1);
+  };
+
   return (
-    <group position={[b.x, 0, b.z]}>
+    <group ref={grpRef} position={[b.x, 0, b.z]} onPointerOver={handlePointerOver} onPointerOut={handlePointerOut} onClick={(e) => { e.stopPropagation(); if (onClick) onClick([b.x, b.h / 2, b.z]); }}>
       {/* Main body */}
       <mesh ref={bodyRef} position={[0, b.h / 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[b.w, b.h, b.d]} />
         <meshStandardMaterial
-          color={zone.color} emissive={zone.emissive}
+          color={bodyColor} emissive={zone.emissive}
           emissiveIntensity={zone.emissiveInt}
           metalness={zone.metal} roughness={zone.rough}
         />
       </mesh>
 
-      {/* Structural columns - vertical edges */}
+      {/* Structural columns - vertical edges - realistic steel/concrete */}
       {Array.from({ length: Math.floor(b.w / 0.6) + 1 }, (_, ci) => {
         const xPos = -b.w / 2 + (ci * b.w) / Math.max(Math.floor(b.w / 0.6), 1);
         return (
           <mesh key={`colz${ci}`} position={[xPos, b.h / 2, b.d / 2 + 0.04]}>
             <boxGeometry args={[0.08, b.h, 0.06]} />
-            <meshStandardMaterial color="#050d15" metalness={0.4} roughness={0.5} />
+            <meshStandardMaterial color={structureColor} metalness={zone.metal * 0.6} roughness={zone.rough + 0.2} />
           </mesh>
         );
       })}
@@ -97,12 +119,12 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
         return (
           <mesh key={`colz-b${ci}`} position={[xPos, b.h / 2, -(b.d / 2 + 0.04)]}>
             <boxGeometry args={[0.08, b.h, 0.06]} />
-            <meshStandardMaterial color="#050d15" metalness={0.4} roughness={0.5} />
+            <meshStandardMaterial color={structureColor} metalness={zone.metal * 0.6} roughness={zone.rough + 0.2} />
           </mesh>
         );
       })}
 
-      {/* Front facade - detailed windows with lighting */}
+      {/* Front facade - detailed windows with realistic glass */}
       {Array.from({ length: b.floors }, (_, fi) => {
         const y = floorH * fi + floorH / 2;
         return Array.from({ length: windowsPerRow }, (_, wi) => {
@@ -110,15 +132,17 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
           const windowLit = Math.random() > 0.3;
           const windowIdx = fi * windowsPerRow + wi;
           return (
-            <mesh key={`win-f${fi}-${wi}`} ref={el => { windowRefs.current[windowIdx] = el; }} 
+            <mesh key={`win-f${fi}-${wi}`} ref={el => { windowRefs.current[windowIdx] = el; }}
               position={[xPos, y, b.d / 2 + 0.05]}>
               <boxGeometry args={[b.w / windowsPerRow * 0.7, floorH * 0.6, 0.03]} />
-              <meshStandardMaterial 
-                color={windowLit ? '#334466' : '#1a2a3a'}
-                emissive={windowLit ? '#4488ff' : '#001a33'}
-                emissiveIntensity={windowLit ? 1.8 : 0.2}
-                metalness={0.3}
-                roughness={0.4}
+              <meshStandardMaterial
+                color={windowLit ? windowColor : '#1a2a3a'}
+                emissive={windowLit ? windowColor : '#0a1a2a'}
+                emissiveIntensity={windowLit ? 2.0 : 0.1}
+                metalness={0.8}
+                roughness={0.1}
+                transparent
+                opacity={windowLit ? 0.9 : 0.6}
               />
             </mesh>
           );
@@ -134,12 +158,14 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
           return (
             <mesh key={`win-b${fi}-${wi}`} position={[xPos, y, -(b.d / 2 + 0.05)]}>
               <boxGeometry args={[b.w / windowsPerRow * 0.7, floorH * 0.6, 0.03]} />
-              <meshStandardMaterial 
-                color={windowLit ? '#334466' : '#1a2a3a'}
-                emissive={windowLit ? '#4488ff' : '#001a33'}
-                emissiveIntensity={windowLit ? 1.8 : 0.2}
-                metalness={0.3}
-                roughness={0.4}
+              <meshStandardMaterial
+                color={windowLit ? windowColor : '#1a2a3a'}
+                emissive={windowLit ? windowColor : '#0a1a2a'}
+                emissiveIntensity={windowLit ? 2.0 : 0.1}
+                metalness={0.8}
+                roughness={0.1}
+                transparent
+                opacity={windowLit ? 0.9 : 0.6}
               />
             </mesh>
           );
@@ -156,10 +182,14 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
           return (
             <mesh key={`win-s${fi}-${si}`} position={[b.w / 2 + 0.05, y, zPos]}>
               <boxGeometry args={[0.03, floorH * 0.6, b.d / sidesPerFloor * 0.65]} />
-              <meshStandardMaterial 
-                color={windowLit ? '#334466' : '#1a2a3a'}
-                emissive={windowLit ? '#4488ff' : '#001a33'}
-                emissiveIntensity={windowLit ? 1.8 : 0.2}
+              <meshStandardMaterial
+                color={windowLit ? windowColor : '#1a2a3a'}
+                emissive={windowLit ? windowColor : '#0a1a2a'}
+                emissiveIntensity={windowLit ? 2.0 : 0.1}
+                metalness={0.8}
+                roughness={0.1}
+                transparent
+                opacity={windowLit ? 0.85 : 0.5}
               />
             </mesh>
           );
@@ -174,10 +204,14 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
           return (
             <mesh key={`win-s2${fi}-${si}`} position={[-(b.w / 2 + 0.05), y, zPos]}>
               <boxGeometry args={[0.03, floorH * 0.6, b.d / sidesPerFloor * 0.65]} />
-              <meshStandardMaterial 
-                color={windowLit ? '#334466' : '#1a2a3a'}
-                emissive={windowLit ? '#4488ff' : '#001a33'}
-                emissiveIntensity={windowLit ? 1.8 : 0.2}
+              <meshStandardMaterial
+                color={windowLit ? windowColor : '#1a2a3a'}
+                emissive={windowLit ? windowColor : '#0a1a2a'}
+                emissiveIntensity={windowLit ? 2.0 : 0.1}
+                metalness={0.8}
+                roughness={0.1}
+                transparent
+                opacity={windowLit ? 0.85 : 0.5}
               />
             </mesh>
           );
@@ -190,7 +224,7 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
         return (
           <mesh key={fi} position={[0, y, b.d / 2 + 0.02]} rotation={[0, 0, 0]}>
             <boxGeometry args={[b.w, 0.06, 0.04]} />
-            <meshStandardMaterial color={floorLineColor} emissive={floorLineColor} emissiveIntensity={0.5} />
+            <meshStandardMaterial color={floorLineColor} emissive={floorLineColor} emissiveIntensity={0.35} metalness={zone.metal * 0.8} roughness={zone.rough} />
           </mesh>
         );
       })}
@@ -199,7 +233,7 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
         return (
           <mesh key={`b${fi}`} position={[0, y, -(b.d / 2 + 0.02)]}>
             <boxGeometry args={[b.w, 0.06, 0.04]} />
-            <meshStandardMaterial color={floorLineColor} emissive={floorLineColor} emissiveIntensity={0.5} />
+            <meshStandardMaterial color={floorLineColor} emissive={floorLineColor} emissiveIntensity={0.35} metalness={zone.metal * 0.8} roughness={zone.rough} />
           </mesh>
         );
       })}
@@ -210,7 +244,7 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
         return (
           <mesh key={`bal${fi}`} position={[0, y, b.d / 2 + 0.15]}>
             <boxGeometry args={[b.w * 0.95, 0.08, 0.25]} />
-            <meshStandardMaterial color="#0a1520" emissive="#1a3a5a" emissiveIntensity={0.2} metalness={0.6} roughness={0.4} />
+            <meshStandardMaterial color={bodyColor} emissive={floorLineColor} emissiveIntensity={0.1} metalness={zone.metal * 0.7} roughness={zone.rough + 0.2} />
           </mesh>
         );
       })}
@@ -218,7 +252,7 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
       {/* Rooftop slab - more detailed */}
       <mesh ref={roofRef} position={[0, b.h, 0]} castShadow>
         <boxGeometry args={[b.w + 0.2, 0.15, b.d + 0.2]} />
-        <meshStandardMaterial color="#0a1e30" emissive={zone.emissive} emissiveIntensity={0.25} metalness={0.95} roughness={0.05} />
+        <meshStandardMaterial color={structureColor} emissive={zone.emissive} emissiveIntensity={0.2} metalness={0.88} roughness={0.1} />
       </mesh>
 
       {/* Rooftop edge trim */}
@@ -228,7 +262,7 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
       ].map((pos, i) => (
         <mesh key={`edge${i}`} position={pos as [number, number, number]}>
           <boxGeometry args={[b.w + 0.2, 0.1, 0.05]} />
-          <meshStandardMaterial color="#050d15" metalness={0.5} roughness={0.5} />
+          <meshStandardMaterial color={structureColor} metalness={zone.metal * 0.5} roughness={zone.rough + 0.3} />
         </mesh>
       ))}
 
@@ -237,11 +271,11 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
         <>
           <mesh ref={antenRef} position={[-b.w * 0.3, b.h + 0.3, 0]}>
             <cylinderGeometry args={[0.015, 0.015, 0.6, 5]} />
-            <meshStandardMaterial color="#ff3366" emissive="#ff0044" emissiveIntensity={2} metalness={0.9} roughness={0.1} />
+            <meshStandardMaterial color="#ff4466" emissive="#ff5577" emissiveIntensity={1.8} metalness={0.85} roughness={0.15} />
           </mesh>
           <mesh position={[b.w * 0.3, b.h + 0.35, 0]}>
             <cylinderGeometry args={[0.012, 0.012, 0.7, 5]} />
-            <meshStandardMaterial color="#ff5588" emissive="#ff2266" emissiveIntensity={1.8} metalness={0.9} roughness={0.1} />
+            <meshStandardMaterial color="#ff5577" emissive="#ff6688" emissiveIntensity={1.6} metalness={0.85} roughness={0.15} />
           </mesh>
         </>
       )}
@@ -249,46 +283,48 @@ function DetailedBuilding({ b, zone }: { b: BD; zone: typeof ZONES[0] }) {
       {/* Rooftop AC/mechanical units - multiple boxes */}
       <mesh position={[b.w * 0.3, b.h + 0.2, b.d * 0.35]}>
         <boxGeometry args={[b.w * 0.25, 0.3, b.d * 0.25]} />
-        <meshStandardMaterial color="#0a1520" metalness={0.8} roughness={0.2} />
+        <meshStandardMaterial color={structureColor} metalness={0.6} roughness={0.4} />
       </mesh>
       <mesh position={[-b.w * 0.25, b.h + 0.15, -b.d * 0.3]}>
         <boxGeometry args={[b.w * 0.2, 0.25, b.d * 0.2]} />
-        <meshStandardMaterial color="#051020" metalness={0.7} roughness={0.3} />
+        <meshStandardMaterial color={'#1a2a3a'} metalness={0.55} roughness={0.45} />
       </mesh>
       <mesh position={[0, b.h + 0.22, -b.d * 0.4]}>
         <boxGeometry args={[b.w * 0.3, 0.28, b.d * 0.18]} />
-        <meshStandardMaterial color="#0a1a2a" metalness={0.75} roughness={0.25} />
+        <meshStandardMaterial color={structureColor} metalness={0.65} roughness={0.35} />
       </mesh>
 
       {/* Rooftop details - conduit pipes */}
       {Array.from({ length: 2 }, (_, pi) => (
         <mesh key={`pipe${pi}`} position={[-b.w * 0.2 + pi * b.w * 0.4, b.h + 0.35, b.d * 0.45]}>
           <cylinderGeometry args={[0.03, 0.03, b.h * 0.4, 6]} />
-          <meshStandardMaterial color="#0a1a2a" metalness={0.6} roughness={0.4} />
+          <meshStandardMaterial color={structureColor} metalness={0.55} roughness={0.45} />
         </mesh>
       ))}
     </group>
   );
 }
 
-function ZoneBuildings({ zone }: { zone: typeof ZONES[0] }) {
+function ZoneBuildings({ zone, onBuildingClick, isMobile }: { zone: typeof ZONES[0]; onBuildingClick?: (pt: [number, number, number]) => void; isMobile?: boolean }) {
   const data = useMemo<BD[]>(() => {
     const placed: Array<[number, number]> = [];
+    const minDist = isMobile ? MIN_DIST * 1.35 : MIN_DIST;
+    const sizeScale = isMobile ? 1.15 : 1;
     return Array.from({ length: zone.count }, () => {
-      const [x, z] = randInRingSpaced(zone.rMin, zone.rMax, placed);
+      const [x, z] = randInRingSpaced(zone.rMin, zone.rMax, placed, 40, minDist);
       placed.push([x, z]);
-      const w = 0.8 + Math.random() * 1.2;
+      const w = (0.8 + Math.random() * 1.2) * sizeScale;
       const h = zone.hMin + Math.random() * (zone.hMax - zone.hMin);
-      const d = 0.8 + Math.random() * 1.2;
+      const d = (0.8 + Math.random() * 1.2) * sizeScale;
       const floors = Math.max(2, Math.round(h / 1.6));
       return { x, z, w, h, d, floors };
-    });
-  }, [zone]);
+    }).slice(0, Math.max(2, Math.round(zone.count * (isMobile ? 0.6 : 1))));
+  }, [zone, isMobile]);
 
   return (
     <>
       {data.map((b, i) => (
-        <DetailedBuilding key={i} b={b} zone={zone} />
+        <DetailedBuilding key={i} b={b} zone={zone} onClick={onBuildingClick} />
       ))}
     </>
   );
@@ -356,11 +392,11 @@ function Drone({ radius, height, speed, phase }: { radius: number; height: numbe
 
 // ── Road network with lanes, markings, and footpaths ──────────
 const ROAD_AXES = [-12, -6, 0, 6, 12] as const;
-const ROAD_WIDTH   = 2.0;   // main road carriageway
-const FOOTPATH_W   = 0.6;   // sidewalk on each side
-const DASH_LEN     = 0.5;
-const DASH_GAP     = 0.4;
-const ROAD_LENGTH  = 50;
+const ROAD_WIDTH = 2.0;   // main road carriageway
+const FOOTPATH_W = 0.6;   // sidewalk on each side
+const DASH_LEN = 0.5;
+const DASH_GAP = 0.4;
+const ROAD_LENGTH = 50;
 
 function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]) => void }) {
   // Build dashed center lines for a road of given length along the given axis
@@ -424,12 +460,12 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
           {/* X-direction road surface */}
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, pos]}>
             <planeGeometry args={[ROAD_LENGTH, ROAD_WIDTH]} />
-            <meshStandardMaterial color="#050e1a" roughness={0.95} metalness={0.05} />
+            <meshStandardMaterial color="#4a5568" roughness={0.95} metalness={0.05} />
           </mesh>
           {/* Z-direction road surface */}
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[pos, 0.01, 0]}>
             <planeGeometry args={[ROAD_WIDTH, ROAD_LENGTH]} />
-            <meshStandardMaterial color="#050e1a" roughness={0.95} metalness={0.05} />
+            <meshStandardMaterial color="#4a5568" roughness={0.95} metalness={0.05} />
           </mesh>
         </group>
       ))}
@@ -440,38 +476,38 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
           {/* X-road footpaths (both sides) */}
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, pos + ROAD_WIDTH / 2 + FOOTPATH_W / 2]}>
             <planeGeometry args={[ROAD_LENGTH, FOOTPATH_W]} />
-            <meshStandardMaterial color="#0a1a28" emissive="#003355" emissiveIntensity={0.12} roughness={0.9} />
+            <meshStandardMaterial color="#8899aa" emissive="#aabbcc" emissiveIntensity={0.15} roughness={0.9} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, pos - ROAD_WIDTH / 2 - FOOTPATH_W / 2]}>
             <planeGeometry args={[ROAD_LENGTH, FOOTPATH_W]} />
-            <meshStandardMaterial color="#0a1a28" emissive="#003355" emissiveIntensity={0.12} roughness={0.9} />
+            <meshStandardMaterial color="#8899aa" emissive="#aabbcc" emissiveIntensity={0.15} roughness={0.9} />
           </mesh>
           {/* Z-road footpaths (both sides) */}
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[pos + ROAD_WIDTH / 2 + FOOTPATH_W / 2, 0.012, 0]}>
             <planeGeometry args={[FOOTPATH_W, ROAD_LENGTH]} />
-            <meshStandardMaterial color="#0a1a28" emissive="#003355" emissiveIntensity={0.12} roughness={0.9} />
+            <meshStandardMaterial color="#8899aa" emissive="#aabbcc" emissiveIntensity={0.15} roughness={0.9} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[pos - ROAD_WIDTH / 2 - FOOTPATH_W / 2, 0.012, 0]}>
             <planeGeometry args={[FOOTPATH_W, ROAD_LENGTH]} />
-            <meshStandardMaterial color="#0a1a28" emissive="#003355" emissiveIntensity={0.12} roughness={0.9} />
+            <meshStandardMaterial color="#8899aa" emissive="#aabbcc" emissiveIntensity={0.15} roughness={0.9} />
           </mesh>
 
           {/* Neon edge trim on footpaths */}
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, pos + ROAD_WIDTH / 2 + FOOTPATH_W]}>
             <planeGeometry args={[ROAD_LENGTH, 0.05]} />
-            <meshStandardMaterial emissive="#00aacc" emissiveIntensity={0.6} color="#001a2a" transparent opacity={0.8} />
+            <meshStandardMaterial emissive="#5588cc" emissiveIntensity={0.4} color="#aabbdd" transparent opacity={0.8} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, pos - ROAD_WIDTH / 2 - FOOTPATH_W]}>
             <planeGeometry args={[ROAD_LENGTH, 0.05]} />
-            <meshStandardMaterial emissive="#00aacc" emissiveIntensity={0.6} color="#001a2a" transparent opacity={0.8} />
+            <meshStandardMaterial emissive="#5588cc" emissiveIntensity={0.4} color="#aabbdd" transparent opacity={0.8} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[pos + ROAD_WIDTH / 2 + FOOTPATH_W, 0.015, 0]}>
             <planeGeometry args={[0.05, ROAD_LENGTH]} />
-            <meshStandardMaterial emissive="#00aacc" emissiveIntensity={0.6} color="#001a2a" transparent opacity={0.8} />
+            <meshStandardMaterial emissive="#5588cc" emissiveIntensity={0.4} color="#aabbdd" transparent opacity={0.8} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[pos - ROAD_WIDTH / 2 - FOOTPATH_W, 0.015, 0]}>
             <planeGeometry args={[0.05, ROAD_LENGTH]} />
-            <meshStandardMaterial emissive="#00aacc" emissiveIntensity={0.6} color="#001a2a" transparent opacity={0.8} />
+            <meshStandardMaterial emissive="#5588cc" emissiveIntensity={0.4} color="#aabbdd" transparent opacity={0.8} />
           </mesh>
         </group>
       ))}
@@ -481,19 +517,19 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
         <group key={`edge${pos}`}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.022, pos + ROAD_WIDTH / 2]}>
             <planeGeometry args={[ROAD_LENGTH, 0.04]} />
-            <meshStandardMaterial emissive="#0055cc" emissiveIntensity={1.2} color="#001133" transparent opacity={0.9} />
+            <meshStandardMaterial emissive="#6688ff" emissiveIntensity={0.8} color="#aabbdd" transparent opacity={0.9} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.022, pos - ROAD_WIDTH / 2]}>
             <planeGeometry args={[ROAD_LENGTH, 0.04]} />
-            <meshStandardMaterial emissive="#0055cc" emissiveIntensity={1.2} color="#001133" transparent opacity={0.9} />
+            <meshStandardMaterial emissive="#6688ff" emissiveIntensity={0.8} color="#aabbdd" transparent opacity={0.9} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[pos + ROAD_WIDTH / 2, 0.022, 0]}>
             <planeGeometry args={[0.04, ROAD_LENGTH]} />
-            <meshStandardMaterial emissive="#0055cc" emissiveIntensity={1.2} color="#001133" transparent opacity={0.9} />
+            <meshStandardMaterial emissive="#6688ff" emissiveIntensity={0.8} color="#aabbdd" transparent opacity={0.9} />
           </mesh>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[pos - ROAD_WIDTH / 2, 0.022, 0]}>
             <planeGeometry args={[0.04, ROAD_LENGTH]} />
-            <meshStandardMaterial emissive="#0055cc" emissiveIntensity={1.2} color="#001133" transparent opacity={0.9} />
+            <meshStandardMaterial emissive="#6688ff" emissiveIntensity={0.8} color="#aabbdd" transparent opacity={0.9} />
           </mesh>
         </group>
       ))}
@@ -502,7 +538,7 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
       {dashPositions.map((d, i) => (
         <mesh key={i} rotation={d.rot} position={d.pos}>
           <planeGeometry args={[d.axis === 'x' ? DASH_LEN : 0.06, d.axis === 'x' ? 0.06 : DASH_LEN]} />
-          <meshStandardMaterial emissive="#ffdd00" emissiveIntensity={1.4} color="#332200" transparent opacity={0.9} />
+          <meshStandardMaterial emissive="#ddcc55" emissiveIntensity={1.0} color="#ffff99" transparent opacity={0.95} />
         </mesh>
       ))}
 
@@ -510,7 +546,7 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
       {crosswalkPositions.map((c, i) => (
         <mesh key={i} rotation={[-Math.PI / 2, 0, 0]} position={c.pos}>
           <planeGeometry args={[0.14, 0.42]} />
-          <meshStandardMaterial color="#ccddff" emissive="#8899cc" emissiveIntensity={0.4} transparent opacity={0.75} />
+          <meshStandardMaterial color="#ffffff" emissive="#ddddff" emissiveIntensity={0.3} transparent opacity={0.85} />
         </mesh>
       ))}
 
@@ -519,7 +555,7 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
         <group key={i}>
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.015, z]}>
             <planeGeometry args={[4, 4]} />
-            <meshStandardMaterial color="#071d0c" emissive="#0d4a15" emissiveIntensity={0.35} transparent opacity={0.9} />
+            <meshStandardMaterial color="#3a8a4a" emissive="#5ac96a" emissiveIntensity={0.25} transparent opacity={0.95} />
           </mesh>
           {/* Small tree dots */}
           {Array.from({ length: 5 }, (_, t) => {
@@ -528,7 +564,7 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
             return (
               <mesh key={t} position={[tx, 0.4, tz]}>
                 <sphereGeometry args={[0.25, 6, 6]} />
-                <meshStandardMaterial color="#0a3a10" emissive="#0d5a18" emissiveIntensity={0.4} />
+                <meshStandardMaterial color="#2a6a3a" emissive="#4a9a5a" emissiveIntensity={0.3} />
               </mesh>
             );
           })}
@@ -574,49 +610,88 @@ function DataRing() {
   return (
     <mesh ref={ref} position={[0, 0.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
       <ringGeometry args={[21, 21.5, 64]} />
-      <meshStandardMaterial color="#001a2a" emissive="#00d4ff" emissiveIntensity={0.6} transparent opacity={0.5} side={THREE.DoubleSide} />
+      <meshStandardMaterial color="#aabbcc" emissive="#6699ff" emissiveIntensity={0.4} transparent opacity={0.4} side={THREE.DoubleSide} />
     </mesh>
   );
 }
 
 // ── Main Component ────────────────────────────────────────────
-export default function CityScene({ onMapClick }: { onMapClick: (pt: [number, number, number]) => void }) {
+export default function CityScene({ onMapClick, onBuildingClick }: { onMapClick: (pt: [number, number, number]) => void; onBuildingClick?: (pt: [number, number, number]) => void }) {
+  const [isMobile, setIsMobile] = useState<boolean>(typeof window !== 'undefined' ? window.innerWidth < 720 : false);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 720);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const cameraPos = isMobile ? [26, 36, 26] as [number, number, number] : [22, 28, 22] as [number, number, number];
+  const cameraFov = isMobile ? 45 : 38;
   const allIssues = useStore(s => s.issues);
   const timeFilter = useStore(s => s.timeFilter);
   const setSelectedIssueId = useStore(s => s.setSelectedIssueId);
   const maxHour = (timeFilter / 100) * 24;
   const issues = allIssues.filter(i => new Date(i.timestamp).getHours() <= maxHour);
 
+  // Derive environment colors based on timeFilter
+  const env = useMemo(() => {
+    const t = timeFilter;
+    const K = [
+      { t: 0, sky: '#020611', amb: '#101827', dir: '#4a7a8f', int: 0.2, fog: '#020611', star: 1 }, // Midnight
+      { t: 20, sky: '#071227', amb: '#1a2a4a', dir: '#5a8ab7', int: 0.3, fog: '#163d84ff', star: 0.8 }, // Pre-dawn
+      { t: 30, sky: '#ff9f68', amb: '#ffdac1', dir: '#ffc1a1', int: 1.2, fog: '#fcc9b0e2', star: 0.2 }, // Dawn
+      { t: 50, sky: '#a6d8ff', amb: '#ffffff', dir: '#fff5d6', int: 2.2, fog: '#cfeefe', star: 0 }, // Noon
+      { t: 70, sky: '#ff7e5f', amb: '#feb47b', dir: '#ff9a9e', int: 1.5, fog: '#fcd0bbd2', star: 0.1 }, // Afternoon/Dusk
+      { t: 80, sky: '#3a1c71', amb: '#2c3e50', dir: '#4a7a8f', int: 0.6, fog: '#394c5aff', star: 0.6 }, // Evening
+      { t: 100, sky: '#020611', amb: '#101827', dir: '#4a7a8f', int: 0.2, fog: '#020611', star: 1 }, // Midnight
+    ];
+
+    let i = 0;
+    while (i < K.length - 1 && t > K[i + 1].t) i++;
+    const k1 = K[i];
+    const k2 = K[i + 1];
+    const f = (t - k1.t) / (k2.t - k1.t || 1);
+
+    const cSky = new THREE.Color(k1.sky).lerp(new THREE.Color(k2.sky), f);
+    const cAmb = new THREE.Color(k1.amb).lerp(new THREE.Color(k2.amb), f);
+    const cDir = new THREE.Color(k1.dir).lerp(new THREE.Color(k2.dir), f);
+    const cFog = new THREE.Color(k1.fog).lerp(new THREE.Color(k2.fog), f);
+    const intensity = k1.int + (k2.int - k1.int) * f;
+    const starOp = k1.star + (k2.star - k1.star) * f;
+
+    return { sky: cSky, amb: cAmb, dir: cDir, int: intensity, fog: cFog, star: starOp };
+  }, [timeFilter]);
+
+  const dayMode = timeFilter >= 25 && timeFilter < 75;
+
   return (
     <div style={{ width: '100%', height: '100%', cursor: 'crosshair' }}>
-      <Canvas shadows camera={{ position: [22, 28, 22], fov: 38 }}
-        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.4 }}>
-        <color attach="background" args={['#010d1a']} />
-        <fog attach="fog" args={['#010d1a', 30, 70]} />
+      <Canvas shadows camera={{ position: cameraPos, fov: cameraFov }}
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: dayMode ? 1.0 : 0.8 }}>
+        <color attach="background" args={[env.sky]} />
+        <fog attach="fog" args={[env.fog, dayMode ? 60 : 30, dayMode ? 140 : 90]} />
 
-        {/* Lights */}
-        <ambientLight intensity={0.55} color="#4488bb" />
-        <directionalLight castShadow position={[12, 22, 12]} intensity={1.8} color="#88ccff"
-          shadow-mapSize={[2048, 2048]} shadow-bias={-0.0001}>
+        {/* Lights - Smooth Transitions */}
+        <hemisphereLight skyColor={env.sky} groundColor={env.amb} intensity={env.int * 0.3} />
+        <ambientLight intensity={env.int * 0.6} color={env.amb} />
+        <directionalLight castShadow position={[25, 35, 20]} intensity={env.int} color={env.dir}
+          shadow-mapSize={[2048, 2048]} shadow-bias={-0.00015}>
           <orthographicCamera attach="shadow-camera" args={[-30, 30, 30, -30]} />
         </directionalLight>
-        <pointLight position={[0, 18, 0]} intensity={1.2} color="#2299ff" distance={50} />
-        <pointLight position={[-14, 4, -14]} intensity={0.6} color="#0055aa" distance={25} />
-        <pointLight position={[14, 4, 14]}  intensity={0.5} color="#003377" distance={22} />
-        <pointLight position={[0, 10, 0]}   intensity={0.8} color="#44aaff" distance={22} />
 
-        <Stars radius={80} depth={25} count={1000} factor={2.5} fade />
+        <pointLight position={[0, 18, 0]} intensity={env.int * 0.2} color={env.dir} distance={50} />
+
+        {env.star > 0.05 && <Stars radius={80} depth={25} count={400} factor={2.5} fade opacity={env.star} />}
 
         <group position={[0, -1.5, 0]}>
           <RoadNetwork onMapClick={onMapClick} />
           <DataRing />
-          {ZONES.map((z, i) => <ZoneBuildings key={i} zone={z} />)}
+          {useMemo(() => ZONES.map((z, i) => <ZoneBuildings key={i} zone={z} onBuildingClick={onBuildingClick} isMobile={isMobile} />), [isMobile, onBuildingClick])}
           <WindowLights />
 
           {/* Drones */}
-          <Drone radius={15} height={9}  speed={0.35} phase={0} />
-          <Drone radius={9}  height={13} speed={0.55} phase={2.1} />
-          <Drone radius={18} height={6}  speed={0.25} phase={4.2} />
+          <Drone radius={15} height={9} speed={0.35} phase={0} />
+          <Drone radius={9} height={13} speed={0.55} phase={2.1} />
+          <Drone radius={18} height={6} speed={0.25} phase={4.2} />
           <Drone radius={11} height={11} speed={0.45} phase={1.0} />
 
           {/* Issue pins */}

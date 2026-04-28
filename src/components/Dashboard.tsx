@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import TopNav from './TopNav';
 import LeftPanel from './LeftPanel';
 import RightPanel from './RightPanel';
@@ -10,11 +10,17 @@ import TimeSlider from './TimeSlider';
 import KanbanBoard from './KanbanBoard';
 import LiveBadge from './LiveBadge';
 import { useStore } from '../store';
-import { LayoutGrid, Map } from 'lucide-react';
+import { LayoutGrid, Map, ChevronDown, Menu, Bell } from 'lucide-react';
+import ReportButton from './ReportButton';
+import AlertsPanel from './AlertsPanel';
 
 export default function Dashboard() {
   const [newIssueCoords, setNewIssueCoords] = useState<[number, number, number] | null>(null);
   const [view, setView] = useState<'map' | 'kanban'>('map');
+  const timeFilter = useStore(s => s.timeFilter);
+  const dayMode = timeFilter >= 25 && timeFilter < 75;
+  const [showPanels, setShowPanels] = useState(false);
+  const [showAlerts, setShowAlerts] = useState(false);
   const issues = useStore(s => s.issues);
   const activeCount = issues.filter(i => i.status !== 'Resolved').length;
 
@@ -88,18 +94,80 @@ export default function Dashboard() {
               </button>
             ))}
           </div>
+
+          {/* Alerts dropdown toggle */}
+          <div style={{ position: 'relative' }}>
+            <button 
+              onClick={() => setShowAlerts(!showAlerts)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '4px 12px', borderRadius: 5, border: 'none', cursor: 'pointer',
+                fontFamily: 'Orbitron', fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
+                background: showAlerts ? 'rgba(255,59,92,0.2)' : 'rgba(255,59,92,0.08)',
+                color: showAlerts ? '#ff3b5c' : '#8f4a5a',
+                border: '1px solid rgba(255,59,92,0.25)',
+                boxShadow: showAlerts ? '0 0 10px rgba(255,59,92,0.2)' : 'none',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+            >
+              <Bell size={11} />
+              <span>LIVE ALERTS</span>
+              <ChevronDown size={11} style={{ 
+                transition: 'transform 0.3s', 
+                transform: showAlerts ? 'rotate(180deg)' : 'rotate(0deg)',
+                opacity: 0.7 
+              }} />
+            </button>
+          </div>
+
+          {/* Panels dropdown toggle */}
+          <div style={{ position: 'relative' }}>
+            <button 
+              onClick={() => setShowPanels(!showPanels)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '4px 12px', borderRadius: 5, border: 'none', cursor: 'pointer',
+                fontFamily: 'Orbitron', fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
+                background: showPanels ? 'rgba(0,212,255,0.2)' : 'rgba(0,212,255,0.08)',
+                color: showPanels ? '#00d4ff' : '#4a7a8f',
+                border: '1px solid rgba(0,212,255,0.25)',
+                boxShadow: showPanels ? '0 0 10px rgba(0,212,255,0.2)' : 'none',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+            >
+              <Menu size={11} />
+              <span>DASHBOARD WIDGETS</span>
+              <ChevronDown size={11} style={{ 
+                transition: 'transform 0.3s', 
+                transform: showPanels ? 'rotate(180deg)' : 'rotate(0deg)',
+                opacity: 0.7 
+              }} />
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Main body */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <LeftPanel />
+        <AnimatePresence>
+          {showPanels && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 268, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.3, ease: 'easeInOut' }}
+              style={{ overflow: 'hidden', flexShrink: 0 }}
+            >
+              <LeftPanel />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Center */}
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           {view === 'map' ? (
             <>
-              <CityScene onMapClick={(coords) => setNewIssueCoords(coords)} />
+              <CityScene onMapClick={(coords) => setNewIssueCoords(coords)} onBuildingClick={(coords) => setNewIssueCoords(coords)} />
               <AnimatePresence>
                 {newIssueCoords && (
                   <AddIssueForm coordinates={newIssueCoords} onClose={() => setNewIssueCoords(null)} />
@@ -119,6 +187,7 @@ export default function Dashboard() {
                   ◈ Click city to report an issue ◈
                 </div>
               </div>
+              {showAlerts && <AlertsPanel />}
             </>
           ) : (
             <div style={{ width: '100%', height: '100%', background: '#020a18', overflowY: 'auto' }}>
@@ -127,10 +196,34 @@ export default function Dashboard() {
           )}
         </div>
 
-        <RightPanel />
+        <AnimatePresence>
+          {showPanels && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 268, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.3, ease: 'easeInOut' }}
+              style={{ overflow: 'hidden', flexShrink: 0 }}
+            >
+              <RightPanel />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      <BottomBar />
+      <AnimatePresence>
+        {showPanels && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 100, opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            style={{ overflow: 'hidden' }}
+          >
+            <BottomBar />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
