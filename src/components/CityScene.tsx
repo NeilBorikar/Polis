@@ -1,12 +1,26 @@
 import { useRef, useMemo, useState, useEffect } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
 import * as THREE from 'three';
 import { useStore } from '../store';
 import type { Issue } from '../types';
 
+interface Zone {
+  count: number;
+  rMin: number;
+  rMax: number;
+  hMin: number;
+  hMax: number;
+  color: string;
+  emissive: string;
+  emissiveInt: number;
+  metal: number;
+  rough: number;
+  windowColor: string;
+}
+
 // ── Zone definitions (reduced counts, wider rings to avoid congestion) ─────
-const ZONES = [
+const ZONES: Zone[] = [
   // Downtown: fewer taller buildings, slightly wider ring
   { count: 6, rMin: 1.5, rMax: 6.5, hMin: 8, hMax: 16, color: '#4a7fa7', emissive: '#5fa3d4', emissiveInt: 0.4, metal: 0.85, rough: 0.12, windowColor: '#89c3e8' },
   // Mid-ring: reduced count, spread wider
@@ -19,11 +33,15 @@ const ZONES = [
 const MIN_DIST = 4.2;
 
 function randInRingSpaced(
-  rMin: number, rMax: number, existing: Array<[number, number]>, tries = 40, minDist = MIN_DIST
+  rMin: number, rMax: number, existing: Array<[number, number]>, seedOffset: number, tries = 40, minDist = MIN_DIST
 ): [number, number] {
+  const pseudo = (s: number) => {
+    const x = Math.sin(s) * 10000;
+    return x - Math.floor(x);
+  };
   for (let t = 0; t < tries; t++) {
-    const angle = Math.random() * Math.PI * 2;
-    const r = rMin + Math.random() * (rMax - rMin);
+    const angle = pseudo(seedOffset + t) * Math.PI * 2;
+    const r = rMin + pseudo(seedOffset + t + 1000) * (rMax - rMin);
     const x = Math.cos(angle) * r;
     const z = Math.sin(angle) * r;
     // Skip if too close to a major road axis (±0.6 units → leave room for roads)
@@ -32,11 +50,19 @@ function randInRingSpaced(
     if (!tooClose) return [x, z];
   }
   // Fallback (ring edge, angle jitter)
-  const angle = Math.random() * Math.PI * 2;
+  const angle = pseudo(seedOffset + 2000) * Math.PI * 2;
   return [Math.cos(angle) * rMax * 0.9, Math.sin(angle) * rMax * 0.9];
 }
 
-interface BD { x: number; z: number; w: number; h: number; d: number; floors: number }
+interface BD { 
+  x: number; 
+  z: number; 
+  w: number; 
+  h: number; 
+  d: number; 
+  floors: number;
+  buildingType: number;
+}
 
 // ── Building with detail geometry ─────────────────────────────────────────
 function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; onClick?: (pt: [number, number, number]) => void }) {
@@ -69,24 +95,24 @@ function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; 
 
   const floorLineColor = zone.emissive;
   const floorH = b.h / Math.max(b.floors, 1);
-  const buildingType = Math.random();
+  const buildingType = b.buildingType;
   const hasBalconies = buildingType > 0.4;
   const windowsPerRow = Math.max(2, Math.ceil(b.w / 0.4));
 
   // Color variation for buildings
   const colorVar = buildingType;
   const bodyColor = colorVar > 0.7 ? '#5a8ab7' : colorVar > 0.4 ? zone.color : '#506070';
-  const windowColor = (zone as any).windowColor || '#89c3e8';
+  const windowColor = zone.windowColor || '#89c3e8';
   const structureColor = buildingType > 0.6 ? '#3a4a5a' : '#2a3a4a';
 
   const grpRef = useRef<THREE.Group>(null);
 
-  const handlePointerOver = (e: any) => {
+  const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
     document.body.style.cursor = 'pointer';
     if (grpRef.current) grpRef.current.scale.set(1.04, 1.04, 1.04);
   };
-  const handlePointerOut = (e: any) => {
+  const handlePointerOut = (e: ThreeEvent<PointerEvent>) => {
     e.stopPropagation();
     document.body.style.cursor = 'default';
     if (grpRef.current) grpRef.current.scale.set(1, 1, 1);
@@ -129,8 +155,12 @@ function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; 
         const y = floorH * fi + floorH / 2;
         return Array.from({ length: windowsPerRow }, (_, wi) => {
           const xPos = -b.w / 2 + (wi + 0.5) * (b.w / windowsPerRow);
-          const windowLit = Math.random() > 0.3;
+          const pseudo = (s: number) => {
+            const val = Math.sin(s) * 10000;
+            return val - Math.floor(val);
+          };
           const windowIdx = fi * windowsPerRow + wi;
+          const windowLit = pseudo(b.buildingType * 100 + windowIdx) > 0.3;
           return (
             <mesh key={`win-f${fi}-${wi}`} ref={el => { windowRefs.current[windowIdx] = el; }}
               position={[xPos, y, b.d / 2 + 0.05]}>
@@ -154,7 +184,11 @@ function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; 
         const y = floorH * fi + floorH / 2;
         return Array.from({ length: windowsPerRow }, (_, wi) => {
           const xPos = -b.w / 2 + (wi + 0.5) * (b.w / windowsPerRow);
-          const windowLit = Math.random() > 0.3;
+          const pseudo = (s: number) => {
+            const val = Math.sin(s) * 10000;
+            return val - Math.floor(val);
+          };
+          const windowLit = pseudo(b.buildingType * 200 + fi * windowsPerRow + wi) > 0.3;
           return (
             <mesh key={`win-b${fi}-${wi}`} position={[xPos, y, -(b.d / 2 + 0.05)]}>
               <boxGeometry args={[b.w / windowsPerRow * 0.7, floorH * 0.6, 0.03]} />
@@ -178,7 +212,11 @@ function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; 
         const sidesPerFloor = Math.max(1, Math.floor(b.d / 0.5));
         return Array.from({ length: sidesPerFloor }, (_, si) => {
           const zPos = -b.d / 2 + (si + 0.5) * (b.d / sidesPerFloor);
-          const windowLit = Math.random() > 0.4;
+          const pseudo = (s: number) => {
+            const val = Math.sin(s) * 10000;
+            return val - Math.floor(val);
+          };
+          const windowLit = pseudo(b.buildingType * 300 + fi * 10 + si) > 0.4;
           return (
             <mesh key={`win-s${fi}-${si}`} position={[b.w / 2 + 0.05, y, zPos]}>
               <boxGeometry args={[0.03, floorH * 0.6, b.d / sidesPerFloor * 0.65]} />
@@ -200,7 +238,11 @@ function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; 
         const sidesPerFloor = Math.max(1, Math.floor(b.d / 0.5));
         return Array.from({ length: sidesPerFloor }, (_, si) => {
           const zPos = -b.d / 2 + (si + 0.5) * (b.d / sidesPerFloor);
-          const windowLit = Math.random() > 0.4;
+          const pseudo = (s: number) => {
+            const val = Math.sin(s) * 10000;
+            return val - Math.floor(val);
+          };
+          const windowLit = pseudo(b.buildingType * 400 + fi * 10 + si) > 0.4;
           return (
             <mesh key={`win-s2${fi}-${si}`} position={[-(b.w / 2 + 0.05), y, zPos]}>
               <boxGeometry args={[0.03, floorH * 0.6, b.d / sidesPerFloor * 0.65]} />
@@ -310,14 +352,22 @@ function ZoneBuildings({ zone, onBuildingClick, isMobile }: { zone: typeof ZONES
     const placed: Array<[number, number]> = [];
     const minDist = isMobile ? MIN_DIST * 1.35 : MIN_DIST;
     const sizeScale = isMobile ? 1.15 : 1;
-    return Array.from({ length: zone.count }, () => {
-      const [x, z] = randInRingSpaced(zone.rMin, zone.rMax, placed, 40, minDist);
+    return Array.from({ length: zone.count }, (_, index) => {
+      // Use index and zone properties as a "seed" for pseudo-randomness to be pure
+      const seed = index + zone.rMin + zone.hMax;
+      const pseudo = (s: number) => {
+        const x = Math.sin(s) * 10000;
+        return x - Math.floor(x);
+      };
+      
+      const [x, z] = randInRingSpaced(zone.rMin, zone.rMax, placed, seed, 40, minDist);
       placed.push([x, z]);
-      const w = (0.8 + Math.random() * 1.2) * sizeScale;
-      const h = zone.hMin + Math.random() * (zone.hMax - zone.hMin);
-      const d = (0.8 + Math.random() * 1.2) * sizeScale;
+      const w = (0.8 + pseudo(seed) * 1.2) * sizeScale;
+      const h = zone.hMin + pseudo(seed + 1) * (zone.hMax - zone.hMin);
+      const d = (0.8 + pseudo(seed + 2) * 1.2) * sizeScale;
       const floors = Math.max(2, Math.round(h / 1.6));
-      return { x, z, w, h, d, floors };
+      const buildingType = pseudo(seed + 3);
+      return { x, z, w, h, d, floors, buildingType };
     }).slice(0, Math.max(2, Math.round(zone.count * (isMobile ? 0.6 : 1))));
   }, [zone, isMobile]);
 
@@ -334,12 +384,17 @@ function ZoneBuildings({ zone, onBuildingClick, isMobile }: { zone: typeof ZONES
 function WindowLights() {
   const positions = useMemo<Array<[number, number, number, string]>>(() => {
     const palette = ['#4499ff', '#00ccff', '#ffdd66', '#ffffff', '#88ddff'];
-    return Array.from({ length: 60 }, () => {
-      const angle = Math.random() * Math.PI * 2;
-      const r = 1 + Math.random() * 9;
+    return Array.from({ length: 60 }, (_, i) => {
+      const pseudo = (s: number) => {
+        const x = Math.sin(s) * 10000;
+        return x - Math.floor(x);
+      };
+      const angle = pseudo(i) * Math.PI * 2;
+      const r = 1 + pseudo(i + 100) * 9;
       const x = Math.cos(angle) * r;
       const z = Math.sin(angle) * r;
-      return [x, 1.5 + Math.random() * 8, z, palette[Math.floor(Math.random() * palette.length)]];
+      const col = palette[Math.floor(pseudo(i + 200) * palette.length)];
+      return [x, 1.5 + pseudo(i + 300) * 8, z, col] as [number, number, number, string];
     });
   }, []);
 
@@ -440,6 +495,20 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
       }
     }
     return cw;
+  }, []);
+
+  const parkData = useMemo(() => {
+    return ([[9, 9], [-9, 9], [9, -9], [-9, -9]] as [number, number][]).map(([x, z], i) => {
+      const pseudo = (s: number) => {
+        const val = Math.sin(s) * 10000;
+        return val - Math.floor(val);
+      };
+      const trees = Array.from({ length: 5 }, (_, t) => ({
+        tx: x + (pseudo(i * 10 + t) - 0.5) * 3,
+        tz: z + (pseudo(i * 10 + t + 5) - 0.5) * 3,
+      }));
+      return { x, z, trees };
+    });
   }, []);
 
   return (
@@ -551,23 +620,19 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
       ))}
 
       {/* ── Green park blocks (city blocks with vegetation) ── */}
-      {([[9, 9], [-9, 9], [9, -9], [-9, -9]] as [number, number][]).map(([x, z], i) => (
+      {parkData.map((park, i) => (
         <group key={i}>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.015, z]}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[park.x, 0.015, park.z]}>
             <planeGeometry args={[4, 4]} />
             <meshStandardMaterial color="#3a8a4a" emissive="#5ac96a" emissiveIntensity={0.25} transparent opacity={0.95} />
           </mesh>
           {/* Small tree dots */}
-          {Array.from({ length: 5 }, (_, t) => {
-            const tx = x + (Math.random() - 0.5) * 3;
-            const tz = z + (Math.random() - 0.5) * 3;
-            return (
-              <mesh key={t} position={[tx, 0.4, tz]}>
-                <sphereGeometry args={[0.25, 6, 6]} />
-                <meshStandardMaterial color="#2a6a3a" emissive="#4a9a5a" emissiveIntensity={0.3} />
-              </mesh>
-            );
-          })}
+          {park.trees.map((tree, t) => (
+            <mesh key={t} position={[tree.tx, 0.4, tree.tz]}>
+              <sphereGeometry args={[0.25, 6, 6]} />
+              <meshStandardMaterial color="#2a6a3a" emissive="#4a9a5a" emissiveIntensity={0.3} />
+            </mesh>
+          ))}
         </group>
       ))}
     </group>
@@ -671,7 +736,7 @@ export default function CityScene({ onMapClick, onBuildingClick }: { onMapClick:
         <fog attach="fog" args={[env.fog, dayMode ? 60 : 30, dayMode ? 140 : 90]} />
 
         {/* Lights - Smooth Transitions */}
-        <hemisphereLight skyColor={env.sky} groundColor={env.amb} intensity={env.int * 0.3} />
+        <hemisphereLight color={env.sky} groundColor={env.amb} intensity={env.int * 0.3} />
         <ambientLight intensity={env.int * 0.6} color={env.amb} />
         <directionalLight castShadow position={[25, 35, 20]} intensity={env.int} color={env.dir}
           shadow-mapSize={[2048, 2048]} shadow-bias={-0.00015}>
@@ -680,7 +745,7 @@ export default function CityScene({ onMapClick, onBuildingClick }: { onMapClick:
 
         <pointLight position={[0, 18, 0]} intensity={env.int * 0.2} color={env.dir} distance={50} />
 
-        {env.star > 0.05 && <Stars radius={80} depth={25} count={400} factor={2.5} fade opacity={env.star} />}
+        {env.star > 0.05 && <Stars radius={80} depth={25} count={400} factor={2.5} fade />}
 
         <group position={[0, -1.5, 0]}>
           <RoadNetwork onMapClick={onMapClick} />

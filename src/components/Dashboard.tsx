@@ -11,14 +11,11 @@ import KanbanBoard from './KanbanBoard';
 import LiveBadge from './LiveBadge';
 import { useStore } from '../store';
 import { LayoutGrid, Map, ChevronDown, Menu, Bell } from 'lucide-react';
-import ReportButton from './ReportButton';
 import AlertsPanel from './AlertsPanel';
 
 export default function Dashboard() {
   const [newIssueCoords, setNewIssueCoords] = useState<[number, number, number] | null>(null);
   const [view, setView] = useState<'map' | 'kanban'>('map');
-  const timeFilter = useStore(s => s.timeFilter);
-  const dayMode = timeFilter >= 25 && timeFilter < 75;
   const [showPanels, setShowPanels] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
   const issues = useStore(s => s.issues);
@@ -101,7 +98,7 @@ export default function Dashboard() {
               onClick={() => setShowAlerts(!showAlerts)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
-                padding: '4px 12px', borderRadius: 5, border: 'none', cursor: 'pointer',
+                padding: '4px 12px', borderRadius: 5, cursor: 'pointer',
                 fontFamily: 'Orbitron', fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
                 background: showAlerts ? 'rgba(255,59,92,0.2)' : 'rgba(255,59,92,0.08)',
                 color: showAlerts ? '#ff3b5c' : '#8f4a5a',
@@ -126,7 +123,7 @@ export default function Dashboard() {
               onClick={() => setShowPanels(!showPanels)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
-                padding: '4px 12px', borderRadius: 5, border: 'none', cursor: 'pointer',
+                padding: '4px 12px', borderRadius: 5, cursor: 'pointer',
                 fontFamily: 'Orbitron', fontSize: 9, fontWeight: 600, letterSpacing: '0.05em',
                 background: showPanels ? 'rgba(0,212,255,0.2)' : 'rgba(0,212,255,0.08)',
                 color: showPanels ? '#00d4ff' : '#4a7a8f',

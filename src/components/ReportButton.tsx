@@ -1,4 +1,3 @@
-import React from 'react';
 
 export default function ReportButton({ onReport }: { onReport: () => void }) {
   return (
