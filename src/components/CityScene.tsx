@@ -1,6 +1,6 @@
 import { useRef, useMemo, useState, useEffect } from 'react';
 import { Canvas, useFrame, type ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, Stars } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { useStore } from '../store';
 import type { Issue } from '../types';
@@ -68,6 +68,7 @@ interface BD {
 function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; onClick?: (pt: [number, number, number]) => void }) {
   const bodyRef = useRef<THREE.Mesh>(null);
   const antenRef = useRef<THREE.Mesh>(null);
+  const anten2Ref = useRef<THREE.Mesh>(null);
   const roofRef = useRef<THREE.Mesh>(null);
   const windowRefs = useRef<(THREE.Mesh | null)[]>([]);
 
@@ -79,9 +80,16 @@ function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; 
       bodyRef.current.position.y = (b.h * wave) / 2;
     }
     if (antenRef.current) {
-      antenRef.current.position.y = b.h * wave + 0.4;
+      antenRef.current.position.y = b.h * wave + 0.3;
       const mat = antenRef.current.material as THREE.MeshStandardMaterial;
-      mat.emissiveIntensity = 1.5 + Math.sin(t * 3 + b.z) * 1.0;
+      const blink = (t * 1.5 + b.x) % 1.0 > 0.85 ? 1 : 0;
+      mat.emissiveIntensity = 0.5 + blink * 4.0;
+    }
+    if (anten2Ref.current) {
+      anten2Ref.current.position.y = b.h * wave + 0.35;
+      const mat = anten2Ref.current.material as THREE.MeshStandardMaterial;
+      const blink = (t * 1.5 + b.z + 0.5) % 1.0 > 0.85 ? 1 : 0;
+      mat.emissiveIntensity = 0.5 + blink * 4.0;
     }
     if (roofRef.current) roofRef.current.position.y = b.h * wave;
 
@@ -136,7 +144,7 @@ function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; 
         return (
           <mesh key={`colz${ci}`} position={[xPos, b.h / 2, b.d / 2 + 0.04]}>
             <boxGeometry args={[0.08, b.h, 0.06]} />
-            <meshStandardMaterial color={structureColor} metalness={zone.metal * 0.6} roughness={zone.rough + 0.2} />
+            <meshPhysicalMaterial color={structureColor} metalness={0.9} roughness={0.1} emissive={zone.emissive} emissiveIntensity={0.05} clearcoat={1.0} clearcoatRoughness={0.1} />
           </mesh>
         );
       })}
@@ -145,7 +153,7 @@ function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; 
         return (
           <mesh key={`colz-b${ci}`} position={[xPos, b.h / 2, -(b.d / 2 + 0.04)]}>
             <boxGeometry args={[0.08, b.h, 0.06]} />
-            <meshStandardMaterial color={structureColor} metalness={zone.metal * 0.6} roughness={zone.rough + 0.2} />
+            <meshPhysicalMaterial color={structureColor} metalness={0.9} roughness={0.1} emissive={zone.emissive} emissiveIntensity={0.05} clearcoat={1.0} clearcoatRoughness={0.1} />
           </mesh>
         );
       })}
@@ -313,11 +321,11 @@ function DetailedBuilding({ b, zone, onClick }: { b: BD; zone: typeof ZONES[0]; 
         <>
           <mesh ref={antenRef} position={[-b.w * 0.3, b.h + 0.3, 0]}>
             <cylinderGeometry args={[0.015, 0.015, 0.6, 5]} />
-            <meshStandardMaterial color="#ff4466" emissive="#ff5577" emissiveIntensity={1.8} metalness={0.85} roughness={0.15} />
+            <meshStandardMaterial color="#ff2244" emissive="#ff1133" emissiveIntensity={1.0} metalness={0.85} roughness={0.15} />
           </mesh>
-          <mesh position={[b.w * 0.3, b.h + 0.35, 0]}>
+          <mesh ref={anten2Ref} position={[b.w * 0.3, b.h + 0.35, 0]}>
             <cylinderGeometry args={[0.012, 0.012, 0.7, 5]} />
-            <meshStandardMaterial color="#ff5577" emissive="#ff6688" emissiveIntensity={1.6} metalness={0.85} roughness={0.15} />
+            <meshStandardMaterial color="#ff2244" emissive="#ff1133" emissiveIntensity={1.0} metalness={0.85} roughness={0.15} />
           </mesh>
         </>
       )}
@@ -419,6 +427,69 @@ function WindowLights() {
   );
 }
 
+// ── Enhanced Stars with twinkling ─────────────────────────────
+function EnhancedStars({ starOpacity }: { starOpacity: number }) {
+  const ref = useRef<THREE.Group>(null);
+
+  const starsData = useMemo(() => {
+    return Array.from({ length: 2000 }, (_, i) => {
+      const pseudo = (s: number) => {
+        const x = Math.sin(s) * 10000;
+        return x - Math.floor(x);
+      };
+      const angle = pseudo(i) * Math.PI * 2;
+      const elevation = (pseudo(i + 100) - 0.5) * Math.PI;
+      const radius = 75;
+      
+      return {
+        x: Math.cos(angle) * Math.cos(elevation) * radius,
+        y: Math.sin(elevation) * radius,
+        z: Math.sin(angle) * Math.cos(elevation) * radius,
+        size: 0.15 + pseudo(i + 150) * 0.25,
+        twinkleSpeed: 0.5 + pseudo(i + 200) * 1.5,
+        twinkleOffset: pseudo(i + 250),
+        brightness: 0.6 + pseudo(i + 300) * 0.4,
+      };
+    });
+  }, []);
+
+  useFrame((state) => {
+    if (!ref.current) return;
+    ref.current.children.forEach((star, i) => {
+      if (star instanceof THREE.Mesh && starsData[i]) {
+        const twinkle = Math.sin(state.clock.elapsedTime * starsData[i].twinkleSpeed + starsData[i].twinkleOffset * Math.PI * 2) * 0.5 + 0.5;
+        const mat = star.material as THREE.MeshStandardMaterial;
+        mat.emissiveIntensity = starsData[i].brightness + twinkle * 1.5;
+        mat.opacity = starOpacity * (0.8 + twinkle * 0.2);
+      }
+    });
+  });
+
+  return (
+    <group ref={ref} renderOrder={100}>
+      {starsData.map((star, i) => (
+        <mesh 
+          key={i} 
+          position={[star.x, star.y, star.z]}
+          renderOrder={101}
+        >
+          <sphereGeometry args={[star.size, 4, 4]} />
+          <meshStandardMaterial
+            color="#ffffff"
+            emissive="#ffffff"
+            emissiveIntensity={1}
+            transparent
+            opacity={starOpacity}
+            toneMapped={false}
+            depthTest={true}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 // ── Flying Drones ─────────────────────────────────────────────
 function Drone({ radius, height, speed, phase }: { radius: number; height: number; speed: number; phase: number }) {
   const ref = useRef<THREE.Group>(null);
@@ -443,6 +514,174 @@ function Drone({ radius, height, speed, phase }: { radius: number; height: numbe
       <pointLight color="#00d4ff" intensity={0.8} distance={4} />
     </group>
   );
+}
+
+// ── Dynamic Traffic System ────────────────────────────────────
+const CAR_COUNT = 80;
+const STREAK_COUNT = 20;
+const BUS_COUNT = 10;
+
+function TrafficSystem() {
+  const carsRef = useRef<THREE.InstancedMesh>(null);
+  const streaksRef = useRef<THREE.InstancedMesh>(null);
+  const busesRef = useRef<THREE.InstancedMesh>(null);
+
+  const carsData = useMemo(() => Array.from({ length: CAR_COUNT }, (_, index) => {
+    const pseudo = (s: number) => {
+      const x = Math.sin(s) * 10000;
+      return x - Math.floor(x);
+    };
+    const isX = pseudo(index) > 0.5;
+    const road = ROAD_AXES[Math.floor(pseudo(index + 1) * ROAD_AXES.length)];
+    const dir = pseudo(index + 2) > 0.5 ? 1 : -1;
+    return {
+      isX, road, dir, speed: 1 + pseudo(index + 3) * 2,
+      pos: (pseudo(index + 4) - 0.5) * ROAD_LENGTH,
+      laneOffset: dir * (ROAD_WIDTH * 0.25),
+      color: new THREE.Color(dir === 1 ? '#ffeedd' : '#ff2222').multiplyScalar(2)
+    };
+  }), []);
+
+  const streaksData = useMemo(() => Array.from({ length: STREAK_COUNT }, (_, index) => {
+    const pseudo = (s: number) => {
+      const x = Math.sin(s) * 10000;
+      return x - Math.floor(x);
+    };
+    const isX = pseudo(index + 100) > 0.5;
+    const road = ROAD_AXES[Math.floor(pseudo(index + 101) * ROAD_AXES.length)];
+    const dir = pseudo(index + 102) > 0.5 ? 1 : -1;
+    return {
+      isX, road, dir, speed: 5 + pseudo(index + 103) * 5,
+      pos: (pseudo(index + 104) - 0.5) * ROAD_LENGTH,
+      laneOffset: dir * (ROAD_WIDTH * 0.15),
+      color: new THREE.Color(dir === 1 ? '#ffffff' : '#ff1111').multiplyScalar(4),
+      length: 1 + pseudo(index + 105) * 3
+    };
+  }), []);
+
+  const busesData = useMemo(() => Array.from({ length: BUS_COUNT }, (_, index) => {
+    const pseudo = (s: number) => {
+      const x = Math.sin(s) * 10000;
+      return x - Math.floor(x);
+    };
+    const isX = pseudo(index + 200) > 0.5;
+    const road = ROAD_AXES[Math.floor(pseudo(index + 201) * ROAD_AXES.length)];
+    const dir = pseudo(index + 202) > 0.5 ? 1 : -1;
+    return {
+      isX, road, dir, speed: 0.5 + pseudo(index + 203) * 1,
+      pos: (pseudo(index + 204) - 0.5) * ROAD_LENGTH,
+      laneOffset: dir * (ROAD_WIDTH * 0.3),
+      color: new THREE.Color('#00ffff').multiplyScalar(1.5)
+    };
+  }), []);
+
+  useEffect(() => {
+    if (carsRef.current) {
+      carsData.forEach((d, i) => carsRef.current!.setColorAt(i, d.color));
+      carsRef.current.instanceColor!.needsUpdate = true;
+    }
+    if (streaksRef.current) {
+      streaksData.forEach((d, i) => streaksRef.current!.setColorAt(i, d.color));
+      streaksRef.current.instanceColor!.needsUpdate = true;
+    }
+    if (busesRef.current) {
+      busesData.forEach((d, i) => busesRef.current!.setColorAt(i, d.color));
+      busesRef.current.instanceColor!.needsUpdate = true;
+    }
+  }, [carsData, streaksData, busesData]);
+
+  useFrame((_, delta) => {
+    const dummy = new THREE.Object3D();
+    
+    if (carsRef.current) {
+      carsData.forEach((d, i) => {
+        d.pos += d.speed * d.dir * delta;
+        if (d.pos > ROAD_LENGTH / 2) d.pos = -ROAD_LENGTH / 2;
+        if (d.pos < -ROAD_LENGTH / 2) d.pos = ROAD_LENGTH / 2;
+        
+        dummy.position.set(d.isX ? d.pos : d.road + d.laneOffset, 0.05, d.isX ? d.road + d.laneOffset : d.pos);
+        dummy.rotation.set(0, d.isX ? 0 : Math.PI / 2, 0);
+        dummy.updateMatrix();
+        carsRef.current!.setMatrixAt(i, dummy.matrix);
+      });
+      carsRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    if (streaksRef.current) {
+      streaksData.forEach((d, i) => {
+        d.pos += d.speed * d.dir * delta;
+        if (d.pos > ROAD_LENGTH / 2) d.pos = -ROAD_LENGTH / 2;
+        if (d.pos < -ROAD_LENGTH / 2) d.pos = ROAD_LENGTH / 2;
+        
+        dummy.position.set(d.isX ? d.pos : d.road + d.laneOffset, 0.06, d.isX ? d.road + d.laneOffset : d.pos);
+        dummy.rotation.set(0, d.isX ? 0 : Math.PI / 2, 0);
+        dummy.scale.set(d.length, 1, 1);
+        dummy.updateMatrix();
+        streaksRef.current!.setMatrixAt(i, dummy.matrix);
+      });
+      streaksRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    if (busesRef.current) {
+      busesData.forEach((d, i) => {
+        d.pos += d.speed * d.dir * delta;
+        if (d.pos > ROAD_LENGTH / 2) d.pos = -ROAD_LENGTH / 2;
+        if (d.pos < -ROAD_LENGTH / 2) d.pos = ROAD_LENGTH / 2;
+        
+        dummy.position.set(d.isX ? d.pos : d.road + d.laneOffset, 0.15, d.isX ? d.road + d.laneOffset : d.pos);
+        dummy.rotation.set(0, d.isX ? 0 : Math.PI / 2, 0);
+        dummy.updateMatrix();
+        busesRef.current!.setMatrixAt(i, dummy.matrix);
+      });
+      busesRef.current.instanceMatrix.needsUpdate = true;
+    }
+  });
+
+  return (
+    <group>
+      <instancedMesh ref={carsRef} args={[undefined, undefined, CAR_COUNT]}>
+        <sphereGeometry args={[0.08, 8, 8]} />
+        <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
+      <instancedMesh ref={streaksRef} args={[undefined, undefined, STREAK_COUNT]}>
+        <boxGeometry args={[1, 0.02, 0.02]} />
+        <meshBasicMaterial toneMapped={false} transparent opacity={0.8} />
+      </instancedMesh>
+      <instancedMesh ref={busesRef} args={[undefined, undefined, BUS_COUNT]}>
+        <boxGeometry args={[0.8, 0.3, 0.25]} />
+        <meshStandardMaterial color="#112233" emissive="#00ffff" emissiveIntensity={0.5} roughness={0.2} metalness={0.8} />
+      </instancedMesh>
+      
+      {/* Moving Neon Bounce Lights */}
+      {busesData.slice(0, 5).map((d, i) => (
+        <TrafficBounceLight key={i} data={d} />
+      ))}
+    </group>
+  );
+}
+
+interface TrafficData {
+  isX: boolean;
+  road: number;
+  dir: number;
+  speed: number;
+  pos: number;
+  laneOffset: number;
+  color: THREE.Color;
+}
+
+function TrafficBounceLight({ data }: { data: TrafficData }) {
+  const ref = useRef<THREE.PointLight>(null);
+  useFrame(() => {
+    if (ref.current) {
+      ref.current.position.set(
+        data.isX ? data.pos : data.road + data.laneOffset,
+        0.5,
+        data.isX ? data.road + data.laneOffset : data.pos
+      );
+    }
+  });
+  return <pointLight ref={ref} color={data.color} intensity={1.5} distance={6} decay={2} />;
 }
 
 // ── Road network with lanes, markings, and footpaths ──────────
@@ -517,7 +756,7 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[0, 0, 0]}
         onClick={(e) => { e.stopPropagation(); onMapClick([e.point.x, 0.5, e.point.z]); }}>
         <planeGeometry args={[70, 70]} />
-        <meshStandardMaterial color="#010d1a" roughness={1} metalness={0} />
+        <meshPhysicalMaterial color="#010a14" roughness={0.4} metalness={0.6} clearcoat={0.8} clearcoatRoughness={0.2} />
       </mesh>
 
       {/* Fine grid for city block pattern */}
@@ -529,12 +768,12 @@ function RoadNetwork({ onMapClick }: { onMapClick: (pt: [number, number, number]
           {/* X-direction road surface */}
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, pos]}>
             <planeGeometry args={[ROAD_LENGTH, ROAD_WIDTH]} />
-            <meshStandardMaterial color="#4a5568" roughness={0.95} metalness={0.05} />
+            <meshPhysicalMaterial color="#1a2535" roughness={0.2} metalness={0.8} clearcoat={1.0} clearcoatRoughness={0.1} />
           </mesh>
           {/* Z-direction road surface */}
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[pos, 0.01, 0]}>
             <planeGeometry args={[ROAD_WIDTH, ROAD_LENGTH]} />
-            <meshStandardMaterial color="#4a5568" roughness={0.95} metalness={0.05} />
+            <meshPhysicalMaterial color="#1a2535" roughness={0.2} metalness={0.8} clearcoat={1.0} clearcoatRoughness={0.1} />
           </mesh>
         </group>
       ))}
@@ -680,6 +919,122 @@ function DataRing() {
   );
 }
 
+// ── Skyline Glow (Distant Atmosphere) ─────────────────────────
+function SkylineGlow({ timeFilter }: { timeFilter: number }) {
+  // Night glow calculation (0-25 and 75-100 are night times)
+  const isNight = timeFilter < 25 || timeFilter > 75;
+  const nightIntensity = timeFilter < 25 ? timeFilter / 25 : (100 - timeFilter) / 25;
+  const nightIntensity2 = Math.max(0, 1 - Math.abs(timeFilter - 50) / 50);
+
+  // Moon position and brightness
+  const moonHour = (timeFilter / 100) * 24;
+  const moonAngle = (moonHour / 24) * Math.PI * 2 - Math.PI / 2;
+  const moonDistance = 65;
+  const moonX = Math.cos(moonAngle) * moonDistance;
+  const moonZ = Math.sin(moonAngle) * moonDistance;
+  const moonBrightness = isNight ? (nightIntensity + nightIntensity2) * 0.5 : 0;
+
+  return (
+    <group position={[0, -2, 0]}>
+      {/* Subtle atmospheric gradient layers */}
+      <mesh position={[0, 30, -58]}>
+        <planeGeometry args={[200, 100]} />
+        <meshBasicMaterial 
+          color={isNight ? "#0a1428" : "#87ceeb"} 
+          transparent 
+          opacity={isNight ? 0.2 : 0.1} 
+          blending={THREE.AdditiveBlending} 
+          depthWrite={false} 
+          fog={false} 
+        />
+      </mesh>
+
+      {/* Subtle horizon atmospheric band */}
+      <mesh position={[0, 5, -58]}>
+        <planeGeometry args={[180, 20]} />
+        <meshBasicMaterial 
+          color={isNight ? "#0f1f2e" : "#e0f6ff"} 
+          transparent 
+          opacity={isNight ? 0.25 : 0.1} 
+          blending={THREE.AdditiveBlending} 
+          depthWrite={false} 
+          fog={false} 
+        />
+      </mesh>
+
+      {/* Subtle horizon ring */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+        <ringGeometry args={[45, 68, 128]} />
+        <meshBasicMaterial 
+          color={isNight ? "#050a0f" : "#d4e8f0"} 
+          transparent 
+          opacity={isNight ? 0.6 : 0.2} 
+          fog={true} 
+        />
+      </mesh>
+
+      {/* Moon with prominent visibility */}
+      {moonBrightness > 0.05 && (
+        <>
+          {/* Large moon glow halo */}
+          <mesh position={[moonX, 50, moonZ - 5]} renderOrder={50}>
+            <sphereGeometry args={[16, 16, 16]} />
+            <meshBasicMaterial 
+              color="#ffeecc" 
+              transparent 
+              opacity={moonBrightness * 0.35} 
+              blending={THREE.AdditiveBlending} 
+              depthWrite={false} 
+              fog={false}
+            />
+          </mesh>
+          {/* Moon glow aura */}
+          <mesh position={[moonX, 50, moonZ - 5]} renderOrder={51}>
+            <sphereGeometry args={[13, 16, 16]} />
+            <meshBasicMaterial 
+              color="#ffddaa" 
+              transparent 
+              opacity={moonBrightness * 0.25} 
+              blending={THREE.AdditiveBlending} 
+              depthWrite={false} 
+              fog={false}
+            />
+          </mesh>
+          {/* Moon core - bright and visible */}
+          <mesh position={[moonX, 50, moonZ - 5]} renderOrder={52}>
+            <sphereGeometry args={[7, 32, 32]} />
+            <meshStandardMaterial 
+              color="#fffff0" 
+              emissive="#ffeecc"
+              emissiveIntensity={moonBrightness * 3} 
+              metalness={0}
+              roughness={0.8}
+              toneMapped={false}
+              depthWrite={true}
+              fog={false}
+            />
+          </mesh>
+        </>
+      )}
+
+      {/* Subtle night city glow reflection at horizon */}
+      {isNight && nightIntensity > 0.1 && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.5, 0]}>
+          <ringGeometry args={[40, 70, 128]} />
+          <meshBasicMaterial 
+            color="#0066ff" 
+            transparent 
+            opacity={nightIntensity * 0.12} 
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+            fog={false}
+          />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────
 export default function CityScene({ onMapClick, onBuildingClick }: { onMapClick: (pt: [number, number, number]) => void; onBuildingClick?: (pt: [number, number, number]) => void }) {
   const [isMobile, setIsMobile] = useState<boolean>(typeof window !== 'undefined' ? window.innerWidth < 720 : false);
@@ -731,33 +1086,58 @@ export default function CityScene({ onMapClick, onBuildingClick }: { onMapClick:
   return (
     <div style={{ width: '100%', height: '100%', cursor: 'crosshair' }}>
       <Canvas shadows camera={{ position: cameraPos, fov: cameraFov }}
-        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: dayMode ? 1.0 : 0.8 }}>
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: dayMode ? 1.0 : 0.7 }}>
         <color attach="background" args={[env.sky]} />
-        <fog attach="fog" args={[env.fog, dayMode ? 60 : 30, dayMode ? 140 : 90]} />
+        <fogExp2 attach="fog" args={[env.fog, dayMode ? 0.008 : 0.008]} />
 
         {/* Lights - Smooth Transitions */}
-        <hemisphereLight color={env.sky} groundColor={env.amb} intensity={env.int * 0.3} />
-        <ambientLight intensity={env.int * 0.6} color={env.amb} />
+        <hemisphereLight color={env.sky} groundColor={env.amb} intensity={env.int * 0.35} />
+        <ambientLight intensity={env.int * 0.5} color={env.amb} />
         <directionalLight castShadow position={[25, 35, 20]} intensity={env.int} color={env.dir}
           shadow-mapSize={[2048, 2048]} shadow-bias={-0.00015}>
           <orthographicCamera attach="shadow-camera" args={[-30, 30, 30, -30]} />
         </directionalLight>
 
-        <pointLight position={[0, 18, 0]} intensity={env.int * 0.2} color={env.dir} distance={50} />
+        <pointLight position={[0, 20, 0]} intensity={env.int * 0.25} color={env.dir} distance={60} />
+        
+        {/* Cyan Ambient Bounce & Neon reflections - stronger at night */}
+        <pointLight position={[0, 4, 0]} intensity={env.int * 0.6} color="#00ffff" distance={50} decay={1.5} />
+        <pointLight position={[0, 6, 0]} intensity={env.int * 0.4} color="#0055ff" distance={65} decay={2} />
+        
+        {/* Night atmosphere glow - distant city lights */}
+        {(timeFilter < 25 || timeFilter > 75) && (
+          <pointLight 
+            position={[0, 30, -40]} 
+            color="#0088ff" 
+            intensity={(timeFilter < 25 ? timeFilter / 25 : (100 - timeFilter) / 25) * 0.8} 
+            distance={80} 
+            decay={2}
+          />
+        )}
 
-        {env.star > 0.05 && <Stars radius={80} depth={25} count={400} factor={2.5} fade />}
+        {/* Enhanced starfield with twinkling animation */}
+        {env.star > 0.05 && (
+          <EnhancedStars starOpacity={env.star} />
+        )}
 
         <group position={[0, -1.5, 0]}>
           <RoadNetwork onMapClick={onMapClick} />
           <DataRing />
+          <SkylineGlow timeFilter={timeFilter} />
           {useMemo(() => ZONES.map((z, i) => <ZoneBuildings key={i} zone={z} onBuildingClick={onBuildingClick} isMobile={isMobile} />), [isMobile, onBuildingClick])}
           <WindowLights />
+
+          <TrafficSystem />
 
           {/* Drones */}
           <Drone radius={15} height={9} speed={0.35} phase={0} />
           <Drone radius={9} height={13} speed={0.55} phase={2.1} />
           <Drone radius={18} height={6} speed={0.25} phase={4.2} />
           <Drone radius={11} height={11} speed={0.45} phase={1.0} />
+          <Drone radius={22} height={15} speed={0.15} phase={3.5} />
+          <Drone radius={6} height={8} speed={0.65} phase={5.5} />
+          <Drone radius={25} height={5} speed={0.2} phase={1.2} />
+          <Drone radius={14} height={16} speed={0.4} phase={0.8} />
 
           {/* Issue pins */}
           {issues.map(issue => (
